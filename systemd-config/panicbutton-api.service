@@ -1,0 +1,15 @@
+[Unit]
+Description=Panic Button API
+After=network.target mysql.service asterisk.service
+
+[Service]
+Type=simple
+User=YOUR_USERNAME
+WorkingDirectory=/opt/panicbutton-api
+ExecStart=/usr/bin/node server.js
+Restart=always
+RestartSec=5
+EnvironmentFile=/opt/panicbutton-api/.env
+
+[Install]
+WantedBy=multi-user.target

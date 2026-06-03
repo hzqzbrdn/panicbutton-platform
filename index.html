@@ -1,0 +1,599 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Panic Button Dashboard</title>
+<script src="/sip.min.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: Arial, sans-serif; background: #1a1a2e; color: #eee; min-height: 100vh; }
+  header { background: #16213e; padding: 16px 24px; display: flex; align-items: center; gap: 12px; border-bottom: 2px solid #0f3460; flex-wrap: wrap; }
+  header h1 { font-size: 1.2rem; color: #e94560; flex:1; }
+  .badge { padding: 4px 10px; border-radius: 12px; font-size: 0.75rem; font-weight: bold; }
+  .badge.connected    { background: #0f6e56; color: #fff; }
+  .badge.disconnected { background: #6e1515; color: #fff; }
+  .badge.registered   { background: #0f3460; color: #fff; }
+  .badge.info         { background: #1a3a6e; color: #adf; }
+  main { padding: 24px; max-width: 980px; margin: 0 auto; }
+  .card { background: #16213e; border-radius: 10px; padding: 20px; margin-bottom: 20px; border: 1px solid #0f3460; }
+  .card h2 { font-size: 0.9rem; text-transform: uppercase; color: #888; margin-bottom: 16px; letter-spacing: 1px; }
+  input, select { background: #0d0d1a; border: 1px solid #0f3460; color: #eee; padding: 6px 10px; border-radius: 4px; font-size: 0.9rem; }
+  .btn { padding: 8px 18px; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; font-size: 0.85rem; white-space: nowrap; }
+  .btn-green  { background: #0f6e56; color: #fff; }
+  .btn-red    { background: #6e1515; color: #fff; }
+  .btn-blue   { background: #0f3460; color: #fff; }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  /* Call alert */
+  .call-alert { display: none; background: #e94560; border-radius: 10px; padding: 20px; margin-bottom: 20px; animation: pulse 1s infinite; }
+  .call-alert.active { display: block; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.7} }
+  .call-alert h2 { color:#fff; font-size:1.4rem; margin-bottom:8px; }
+  .call-alert p  { color:#ffcdd2; margin-bottom:16px; }
+
+  /* Video */
+  #videoPanel { display:none; }
+  #videoPanel.active { display:block; }
+  .video-wrapper { position:relative; background:#000; border-radius:8px; overflow:hidden; width:100%; aspect-ratio:16/9; margin-bottom:12px; }
+  #remoteVideo { width:100%; height:100%; object-fit:cover; }
+  .video-badge  { position:absolute; top:10px; left:10px; background:rgba(233,69,96,0.9); color:#fff; padding:3px 10px; border-radius:10px; font-size:0.75rem; font-weight:bold; }
+  .video-caller { position:absolute; bottom:10px; left:10px; background:rgba(0,0,0,0.6); color:#fff; padding:4px 12px; border-radius:6px; font-size:0.85rem; }
+  .no-video-msg { display:flex; align-items:center; justify-content:center; height:100px; color:#555; font-size:0.85rem; background:#0d0d1a; border-radius:8px; margin-bottom:12px; }
+
+  /* Tabs */
+  .tabs { display:flex; gap:4px; margin-bottom:16px; flex-wrap:wrap; }
+  .tab { padding:6px 14px; border-radius:6px; cursor:pointer; font-size:0.85rem; color:#888; background:#0d0d1a; border:1px solid #0f3460; }
+  .tab.active { background:#0f3460; color:#eee; }
+
+  /* Tables */
+  .tbl { width:100%; border-collapse:collapse; font-size:0.85rem; }
+  .tbl th { text-align:left; color:#555; padding:6px 8px; border-bottom:1px solid #0f3460; font-weight:normal; text-transform:uppercase; font-size:0.72rem; }
+  .tbl td { padding:8px; border-bottom:1px solid #0d0d1a; vertical-align:middle; }
+  .tbl tr:last-child td { border-bottom:none; }
+  .pill { display:inline-block; padding:2px 8px; border-radius:8px; font-size:0.72rem; }
+  .pill-green  { background:#0f3d2e; color:#81c784; }
+  .pill-blue   { background:#0f2040; color:#64b5f6; }
+  .pill-gray   { background:#222; color:#888; }
+  .pill-red    { background:#3d0f0f; color:#ef9a9a; }
+  .pill-orange { background:#3d2200; color:#ffb74d; }
+
+  /* Status dot */
+  .dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:5px; }
+  .dot-green { background:#81c784; box-shadow:0 0 4px #81c784; }
+  .dot-red   { background:#ef5350; }
+  .dot-gray  { background:#555; }
+
+  /* Form grid */
+  .form-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(170px,1fr)); gap:10px; margin-bottom:12px; }
+  .form-grid input, .form-grid select { width:100%; }
+  .form-label { color:#888; font-size:0.72rem; margin-bottom:3px; text-transform:uppercase; }
+
+  /* Log */
+  .log { background:#0d0d1a; border-radius:6px; padding:12px; height:140px; overflow-y:auto; font-size:0.8rem; font-family:monospace; }
+  .log p { margin-bottom:3px; }
+  .log p.info    { color:#64b5f6; }
+  .log p.success { color:#81c784; }
+  .log p.error   { color:#e57373; }
+  .log p.warn    { color:#ffb74d; }
+
+  .empty-msg { color:#555; font-size:0.85rem; padding:16px 0; text-align:center; }
+  audio { display:none; }
+</style>
+<script>
+// Alarm sound using Web Audio API - no file needed
+let alarmCtx = null, alarmNodes = [];
+
+function startAlarm() {
+  stopAlarm();
+  alarmCtx = new (window.AudioContext || window.webkitAudioContext)();
+  
+  function beep() {
+    if (!alarmCtx) return;
+    const osc = alarmCtx.createOscillator();
+    const gain = alarmCtx.createGain();
+    osc.connect(gain);
+    gain.connect(alarmCtx.destination);
+    
+    osc.type = 'square';
+    osc.frequency.setValueAtTime(880, alarmCtx.currentTime);
+    osc.frequency.setValueAtTime(660, alarmCtx.currentTime + 0.15);
+    
+    gain.gain.setValueAtTime(0.3, alarmCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, alarmCtx.currentTime + 0.4);
+    
+    osc.start(alarmCtx.currentTime);
+    osc.stop(alarmCtx.currentTime + 0.4);
+    alarmNodes.push(osc);
+  }
+
+  beep();
+  const interval = setInterval(() => { if (alarmCtx) beep(); else clearInterval(interval); }, 600);
+  alarmNodes.push({ stop: () => clearInterval(interval) });
+}
+
+function stopAlarm() {
+  if (alarmCtx) { alarmCtx.close(); alarmCtx = null; }
+  alarmNodes = [];
+}
+</script>
+</head>
+<body>
+<header>
+  <h1>&#128680; Panic Button Dashboard</h1>
+  <span id="siteBadge" class="badge info">Sites: —</span>
+  <span id="wsBadge"  class="badge disconnected">WS: Disconnected</span>
+  <span id="regBadge" class="badge disconnected">SIP: Unregistered</span>
+</header>
+<main>
+
+  <!-- PANIC ALERT -->
+  <div id="callAlert" class="call-alert">
+    <h2>&#9888;&#65039; PANIC CALL INCOMING</h2>
+    <p id="callerId">From: Unknown</p>
+    <button class="btn btn-green" onclick="answerCall()">Answer</button>
+    <button class="btn btn-red"   onclick="rejectCall()" style="margin-left:8px;">Reject</button>
+  </div>
+
+  <!-- VIDEO -->
+  <div id="videoPanel" class="card">
+    <h2>&#127909; Live Video Feed</h2>
+    <div id="videoWrapper" class="video-wrapper" style="display:none;">
+      <video id="remoteVideo" autoplay playsinline></video>
+      <div class="video-badge">&#128247; LIVE</div>
+      <div class="video-caller" id="videoCallerLabel"></div>
+    </div>
+    <div id="noVideoMsg" class="no-video-msg">&#128250; No video — audio only call</div>
+    <div style="display:flex;align-items:center;gap:12px;margin-top:10px;">
+      <div id="callStatus" style="color:#888;flex:1;font-size:0.9rem;">No active call</div>
+      <button class="btn btn-red" onclick="hangupCall()" id="hangupBtn" disabled>Hang Up</button>
+    </div>
+  </div>
+
+  <!-- SIP CONNECTION -->
+  <div class="card">
+    <h2>&#128225; SIP Connection</h2>
+    <div class="form-grid">
+      <div><div class="form-label">Server</div><input id="sipServer" value=""></div>
+      <div><div class="form-label">Username</div><input id="sipUser" value="operator"></div>
+      <div><div class="form-label">Password</div><input id="sipPass" type="password" value=""></div>
+    </div>
+    <div style="display:flex;gap:8px;">
+      <button class="btn btn-blue"  onclick="connectSIP()">Connect</button>
+      <button class="btn btn-red"   onclick="disconnectSIP()">Disconnect</button>
+    </div>
+  </div>
+
+  <!-- SITE MANAGEMENT -->
+  <div class="card">
+    <h2>&#9881;&#65039; Site Management</h2>
+    <div style="display:flex;gap:10px;align-items:center;margin-bottom:16px;padding-bottom:16px;border-bottom:1px solid #0f3460;flex-wrap:wrap;">
+      <div style="flex:1;min-width:200px;"><div class="form-label">API URL</div><input id="apiBase" value="" style="width:100%;"></div>
+      <div style="flex:1;min-width:160px;"><div class="form-label">API Key</div><input id="apiKey" type="password" value="" style="width:100%;"></div>
+      <button class="btn btn-blue" onclick="loadAll()" style="margin-top:16px;">Load</button>
+    </div>
+
+    <div class="tabs">
+      <div class="tab active"  onclick="switchTab('devices')">&#128242; Devices</div>
+      <div class="tab"         onclick="switchTab('operators')">&#128100; Operators</div>
+      <div class="tab"         onclick="switchTab('status')">&#128308; Status</div>
+      <div class="tab"         onclick="switchTab('calls')">&#128222; Call History</div>
+      <div class="tab"         onclick="switchTab('sites')">&#127970; Sites</div>
+    </div>
+
+    <!-- DEVICES -->
+    <div id="tab-devices">
+      <div class="form-grid">
+        <div><div class="form-label">Site</div><select id="devSite" onchange="renderDevices()"></select></div>
+        <div><div class="form-label">Device ID (numeric)</div><input id="devId" placeholder="e.g. 1005"></div>
+        <div><div class="form-label">Password</div><input id="devPass" placeholder="Password"></div>
+        <div><div class="form-label">Location</div><input id="devLocation" placeholder="e.g. Reception"></div>
+      </div>
+      <button class="btn btn-green" onclick="addDevice()" style="margin-bottom:14px;">Add Device</button>
+      <div id="deviceTable"><p class="empty-msg">Click Load to fetch devices</p></div>
+    </div>
+
+    <!-- OPERATORS -->
+    <div id="tab-operators" style="display:none;">
+      <div class="form-grid">
+        <div><div class="form-label">Site</div><select id="opSite" onchange="renderOperators()"></select></div>
+        <div><div class="form-label">SIP ID</div><input id="opSipId" placeholder="e.g. op_siteA"></div>
+        <div><div class="form-label">Password</div><input id="opPass" placeholder="Password"></div>
+        <div><div class="form-label">Display Name</div><input id="opName" placeholder="e.g. Site A Operator"></div>
+      </div>
+      <button class="btn btn-green" onclick="addOperator()" style="margin-bottom:14px;">Add Operator</button>
+      <div id="operatorTable"><p class="empty-msg">Select a site to view operators</p></div>
+    </div>
+
+    <!-- STATUS -->
+    <div id="tab-status" style="display:none;">
+      <div style="display:flex;gap:10px;align-items:center;margin-bottom:14px;">
+        <select id="statusSite" onchange="renderStatus()" style="width:200px;"></select>
+        <button class="btn btn-blue" onclick="renderStatus()">&#8635; Refresh</button>
+      </div>
+      <div id="statusTable"><p class="empty-msg">Select a site to view device status</p></div>
+    </div>
+
+    <!-- CALL HISTORY -->
+    <div id="tab-calls" style="display:none;">
+      <div style="display:flex;gap:10px;align-items:center;margin-bottom:14px;">
+        <select id="callsSite" onchange="renderCalls()" style="width:200px;"></select>
+        <button class="btn btn-blue" onclick="renderCalls()">&#8635; Refresh</button>
+      </div>
+      <div id="callsTable"><p class="empty-msg">Select a site to view call history</p></div>
+    </div>
+
+    <!-- SITES -->
+    <div id="tab-sites" style="display:none;">
+      <div class="form-grid">
+        <div><div class="form-label">Site Name</div><input id="siteName" placeholder="e.g. Client B"></div>
+        <div>
+          <div class="form-label">Server Type</div>
+          <select id="siteType" onchange="document.getElementById('asteriskHostRow').style.display=this.value==='dedicated'?'block':'none';">
+            <option value="shared">Shared (this server)</option>
+            <option value="dedicated">Dedicated server</option>
+          </select>
+        </div>
+        <div id="asteriskHostRow" style="display:none;">
+          <div class="form-label">Asterisk Host</div>
+          <input id="asteriskHost" placeholder="e.g. 10.0.0.5">
+        </div>
+      </div>
+      <button class="btn btn-green" onclick="addSite()" style="margin-bottom:14px;">Create Site</button>
+      <div id="siteTable"><p class="empty-msg">Click Load to fetch sites</p></div>
+    </div>
+  </div>
+
+  <!-- EVENT LOG -->
+  <div class="card">
+    <h2>&#128220; Event Log</h2>
+    <div class="log" id="log"></div>
+  </div>
+
+</main>
+<audio id="remoteAudio" autoplay></audio>
+<script>
+let ua = null, currentSession = null, sites = [];
+
+function apiBase() { return document.getElementById('apiBase').value.trim(); }
+function apiKey()  { return document.getElementById('apiKey').value.trim(); }
+function apiFetch(path, opts={}) {
+  return fetch(apiBase()+path, { ...opts, headers:{'x-api-key':apiKey(),'Content-Type':'application/json',...(opts.headers||{})} });
+}
+
+// ── log ──────────────────────────────────────────────────────────
+function log(msg, type='info') {
+  const el = document.getElementById('log');
+  const t = new Date().toLocaleTimeString();
+  el.innerHTML += '<p class="'+type+'">['+t+'] '+msg+'</p>';
+  el.scrollTop = el.scrollHeight;
+}
+
+function setWsBadge(s) {
+  const el = document.getElementById('wsBadge');
+  el.className='badge '+(s==='connected'?'connected':'disconnected');
+  el.textContent='WS: '+(s==='connected'?'Connected':'Disconnected');
+}
+function setRegBadge(s) {
+  const el = document.getElementById('regBadge');
+  el.className='badge '+(s==='registered'?'registered':'disconnected');
+  el.textContent='SIP: '+(s==='registered'?'Registered':'Unregistered');
+}
+
+// ── tabs ─────────────────────────────────────────────────────────
+function switchTab(name) {
+  ['devices','operators','status','calls','sites'].forEach(t => {
+    document.getElementById('tab-'+t).style.display = t===name?'block':'none';
+  });
+  document.querySelectorAll('.tab').forEach((el,i) => {
+    el.classList.toggle('active', ['devices','operators','status','calls','sites'][i]===name);
+  });
+  if (name==='devices')   renderDevices();
+  if (name==='operators') renderOperators();
+  if (name==='status')    renderStatus();
+  if (name==='calls')     renderCalls();
+  if (name==='sites')     renderSites();
+}
+
+// ── load all ─────────────────────────────────────────────────────
+async function loadAll() {
+  try {
+    const res = await apiFetch('/sites');
+    const data = await res.json();
+    sites = data.sites || [];
+    ['devSite','opSite','statusSite','callsSite'].forEach(id => {
+      const el = document.getElementById(id);
+      el.innerHTML = sites.map(s=>`<option value="${s.id}">${s.name}</option>`).join('');
+    });
+    document.getElementById('siteBadge').textContent = 'Sites: '+sites.length;
+    renderDevices();
+    log('Loaded '+sites.length+' site(s)','success');
+  } catch(err) { log('Failed to load: '+err.message,'error'); }
+}
+
+// ── devices ──────────────────────────────────────────────────────
+async function renderDevices() {
+  const el = document.getElementById('deviceTable');
+  el.innerHTML = '<p class="empty-msg">Loading...</p>';
+  try {
+    const res = await apiFetch('/devices');
+    const data = await res.json();
+    const devs = data.devices || [];
+    if (!devs.length) { el.innerHTML='<p class="empty-msg">No devices.</p>'; return; }
+    el.innerHTML = `<table class="tbl">
+      <tr><th>ID</th><th>Site</th><th>Location</th><th>Codecs</th><th></th></tr>
+      ${devs.map(d=>`<tr>
+        <td><span class="pill pill-blue">${d.sip_id||d.id}</span></td>
+        <td style="color:#888;font-size:0.8rem;">${d.site_id||'—'}</td>
+        <td style="color:#aaa;">${d.location||'—'}</td>
+        <td><span class="pill pill-gray" style="font-size:0.7rem;">${(d.allow||'').replace(/,/g,' ')}</span></td>
+        <td><button class="btn btn-red" style="padding:3px 10px;font-size:0.78rem;" onclick="removeDevice('${d.sip_id||d.id}','${d.site_id||''}')">Remove</button></td>
+      </tr>`).join('')}
+    </table>`;
+  } catch(err) { el.innerHTML='<p class="empty-msg" style="color:#e57373;">'+err.message+'</p>'; }
+}
+
+async function addDevice() {
+  const siteId=document.getElementById('devSite').value;
+  const id=document.getElementById('devId').value.trim();
+  const password=document.getElementById('devPass').value.trim();
+  const location=document.getElementById('devLocation').value.trim();
+  if (!id||!password){alert('Device ID and password required');return;}
+  try {
+    const res = await apiFetch('/sites/'+siteId+'/devices',{method:'POST',body:JSON.stringify({id,password,location})});
+    const data = await res.json();
+    if (data.success){
+      log('Device '+id+' added to '+siteId,'success');
+      document.getElementById('devId').value='';
+      document.getElementById('devPass').value='';
+      document.getElementById('devLocation').value='';
+      renderDevices();
+    } else { log('Error: '+data.error,'error'); }
+  } catch(err){log('Error: '+err.message,'error');}
+}
+
+async function removeDevice(sipId,siteId) {
+  if (!confirm('Remove device '+sipId+'?')) return;
+  try {
+    const path = siteId?'/sites/'+siteId+'/devices/'+sipId:'/devices/'+sipId;
+    const res = await apiFetch(path,{method:'DELETE'});
+    const data = await res.json();
+    if (data.success){log('Device '+sipId+' removed','warn');renderDevices();}
+    else{log('Error: '+data.error,'error');}
+  } catch(err){log('Error: '+err.message,'error');}
+}
+
+// ── operators ────────────────────────────────────────────────────
+async function renderOperators() {
+  const siteId=document.getElementById('opSite').value;
+  if (!siteId) return;
+  const el=document.getElementById('operatorTable');
+  el.innerHTML='<p class="empty-msg">Loading...</p>';
+  try {
+    const res = await apiFetch('/sites/'+siteId+'/operators');
+    const data = await res.json();
+    const ops = data.operators||[];
+    if (!ops.length){el.innerHTML='<p class="empty-msg">No operators for this site.</p>';return;}
+    el.innerHTML=`<table class="tbl">
+      <tr><th>SIP ID</th><th>Display Name</th><th>Site</th><th></th></tr>
+      ${ops.map(o=>`<tr>
+        <td><span class="pill pill-green">${o.sip_id}</span></td>
+        <td style="color:#aaa;">${o.display_name||'—'}</td>
+        <td style="color:#888;font-size:0.8rem;">${o.site_id}</td>
+        <td><button class="btn btn-red" style="padding:3px 10px;font-size:0.78rem;" onclick="removeOperator('${o.sip_id}','${o.site_id}')">Remove</button></td>
+      </tr>`).join('')}
+    </table>`;
+  } catch(err){el.innerHTML='<p class="empty-msg" style="color:#e57373;">'+err.message+'</p>';}
+}
+
+async function addOperator() {
+  const siteId=document.getElementById('opSite').value;
+  const sip_id=document.getElementById('opSipId').value.trim();
+  const password=document.getElementById('opPass').value.trim();
+  const display_name=document.getElementById('opName').value.trim();
+  if (!sip_id||!password){alert('SIP ID and password required');return;}
+  try {
+    const res = await apiFetch('/sites/'+siteId+'/operators',{method:'POST',body:JSON.stringify({sip_id,password,display_name})});
+    const data = await res.json();
+    if (data.success){
+      log('Operator '+sip_id+' added','success');
+      document.getElementById('opSipId').value='';
+      document.getElementById('opPass').value='';
+      document.getElementById('opName').value='';
+      renderOperators();
+    } else{log('Error: '+data.error,'error');}
+  } catch(err){log('Error: '+err.message,'error');}
+}
+
+async function removeOperator(sipId,siteId) {
+  if (!confirm('Remove operator '+sipId+'?')) return;
+  try {
+    const res = await apiFetch('/sites/'+siteId+'/operators/'+sipId,{method:'DELETE'});
+    const data = await res.json();
+    if (data.success){log('Operator '+sipId+' removed','warn');renderOperators();}
+    else{log('Error: '+data.error,'error');}
+  } catch(err){log('Error: '+err.message,'error');}
+}
+
+// ── device status ────────────────────────────────────────────────
+async function renderStatus() {
+  const siteId=document.getElementById('statusSite').value;
+  if (!siteId) return;
+  const el=document.getElementById('statusTable');
+  el.innerHTML='<p class="empty-msg">Loading...</p>';
+  try {
+    const res = await apiFetch('/sites/'+siteId+'/status');
+    const data = await res.json();
+    const devs = data.devices||[];
+    if (!devs.length){el.innerHTML='<p class="empty-msg">No devices for this site.</p>';return;}
+    el.innerHTML=`<table class="tbl">
+      <tr><th>Status</th><th>Device ID</th><th>Location</th><th>Expires</th></tr>
+      ${devs.map(d=>{
+        const online = d.online;
+        const exp = d.expires ? new Date(d.expires*1000).toLocaleTimeString() : '—';
+        return `<tr>
+          <td><span class="dot ${online?'dot-green':'dot-red'}"></span>${online?'<span class="pill pill-green">Online</span>':'<span class="pill pill-red">Offline</span>'}</td>
+          <td><span class="pill pill-blue">${d.sip_id}</span></td>
+          <td style="color:#aaa;">${d.location||'—'}</td>
+          <td style="color:#666;font-size:0.8rem;">${exp}</td>
+        </tr>`;
+      }).join('')}
+    </table>`;
+  } catch(err){el.innerHTML='<p class="empty-msg" style="color:#e57373;">'+err.message+'</p>';}
+}
+
+// ── call history ─────────────────────────────────────────────────
+async function renderCalls() {
+  const siteId=document.getElementById('callsSite').value;
+  if (!siteId) return;
+  const el=document.getElementById('callsTable');
+  el.innerHTML='<p class="empty-msg">Loading...</p>';
+  try {
+    const res = await apiFetch('/sites/'+siteId+'/calls');
+    const data = await res.json();
+    const calls = data.calls||[];
+    if (!calls.length){el.innerHTML='<p class="empty-msg">No calls recorded yet.</p>';return;}
+    el.innerHTML=`<table class="tbl">
+      <tr><th>Time</th><th>Device</th><th>Duration</th><th>Status</th><th>Video</th></tr>
+      ${calls.map(c=>`<tr>
+        <td style="color:#888;font-size:0.8rem;">${new Date(c.started_at).toLocaleString()}</td>
+        <td><span class="pill pill-blue">${c.device_id}</span></td>
+        <td style="color:#aaa;">${c.duration?c.duration+'s':'—'}</td>
+        <td>${c.status==='answered'?'<span class="pill pill-green">Answered</span>':c.status==='missed'?'<span class="pill pill-red">Missed</span>':'<span class="pill pill-orange">Rejected</span>'}</td>
+        <td>${c.has_video?'<span class="pill pill-blue">&#127909;</span>':'<span class="pill pill-gray">—</span>'}</td>
+      </tr>`).join('')}
+    </table>`;
+  } catch(err){el.innerHTML='<p class="empty-msg" style="color:#e57373;">'+err.message+'</p>';}
+}
+
+// ── sites ────────────────────────────────────────────────────────
+async function renderSites() {
+  const el=document.getElementById('siteTable');
+  el.innerHTML='<p class="empty-msg">Loading...</p>';
+  try {
+    const res = await apiFetch('/sites');
+    const data = await res.json();
+    const ss = data.sites||[];
+    if (!ss.length){el.innerHTML='<p class="empty-msg">No sites.</p>';return;}
+    el.innerHTML=`<table class="tbl">
+      <tr><th>ID</th><th>Name</th><th>Type</th><th>Context</th><th></th></tr>
+      ${ss.map(s=>`<tr>
+        <td style="color:#888;font-size:0.78rem;">${s.id}</td>
+        <td><b>${s.name}</b></td>
+        <td><span class="pill ${s.server_type==='shared'?'pill-green':'pill-blue'}">${s.server_type}</span></td>
+        <td style="color:#888;font-size:0.78rem;">${s.context_name}</td>
+        <td><button class="btn btn-red" style="padding:3px 10px;font-size:0.78rem;" onclick="removeSite('${s.id}')">Delete</button></td>
+      </tr>`).join('')}
+    </table>`;
+  } catch(err){el.innerHTML='<p class="empty-msg" style="color:#e57373;">'+err.message+'</p>';}
+}
+
+async function addSite() {
+  const name=document.getElementById('siteName').value.trim();
+  const server_type=document.getElementById('siteType').value;
+  const asterisk_host=document.getElementById('asteriskHost').value.trim()||'127.0.0.1';
+  if (!name){alert('Site name required');return;}
+  try {
+    const res = await apiFetch('/sites',{method:'POST',body:JSON.stringify({name,server_type,asterisk_host})});
+    const data = await res.json();
+    if (data.success){
+      log('Site "'+name+'" created — API key: '+data.site.api_key,'success');
+      document.getElementById('siteName').value='';
+      await loadAll(); renderSites();
+    } else{log('Error: '+data.error,'error');}
+  } catch(err){log('Error: '+err.message,'error');}
+}
+
+async function removeSite(id) {
+  if (!confirm('Delete site '+id+' and all its data?')) return;
+  try {
+    const res = await apiFetch('/sites/'+id,{method:'DELETE'});
+    const data = await res.json();
+    if (data.success){log('Site '+id+' deleted','warn');loadAll();renderSites();}
+    else{log('Error: '+data.error,'error');}
+  } catch(err){log('Error: '+err.message,'error');}
+}
+
+// ── SIP ──────────────────────────────────────────────────────────
+function connectSIP() {
+  const server=document.getElementById('sipServer').value;
+  const user=document.getElementById('sipUser').value;
+  const pass=document.getElementById('sipPass').value;
+  const wsPort=(server.indexOf('.')!==-1&&server.split('.').length===4&&!isNaN(server.split('.')[0]))?':8443':'';
+  const socket=new JsSIP.WebSocketInterface('wss://'+server+wsPort+'/ws');
+  const configuration={
+    sockets:[socket],uri:'sip:'+user+'@'+server,password:pass,
+    register:true,register_expires:300,
+    connection_recovery_min_interval:2,connection_recovery_max_interval:30
+  };
+  ua=new JsSIP.UA(configuration);
+  ua.on('connecting',        ()=>log('Connecting...','info'));
+  ua.on('connected',         ()=>{setWsBadge('connected');log('WebSocket connected','success');});
+  ua.on('disconnected',      ()=>{setWsBadge('disconnected');setRegBadge('unregistered');log('WebSocket disconnected','error');});
+  ua.on('registered',        ()=>{setRegBadge('registered');log('Registered as '+user,'success');});
+  ua.on('unregistered',      ()=>{setRegBadge('unregistered');log('Unregistered','warn');});
+  ua.on('registrationFailed',e=>log('Registration failed: '+e.cause,'error'));
+  ua.on('newRTCSession',(e)=>{
+    if (e.originator!=='remote') return;
+    currentSession=e.session;
+    var caller=e.session.remote_identity.uri.user;
+    log('PANIC call from: '+caller,'warn');
+    document.getElementById('callerId').textContent='From: '+caller;
+    document.getElementById('callAlert').classList.add('active');
+    startAlarm();
+    e.session.on('ended',()=>endCall());
+    e.session.on('failed',()=>endCall());
+  });
+  ua.start();
+}
+
+function disconnectSIP() {
+  if (ua){ua.stop();ua=null;}
+  setWsBadge('disconnected');setRegBadge('unregistered');
+  log('Disconnected','warn');
+}
+
+function answerCall() {
+	stopAlarm(); 
+  if (!currentSession) return;
+  var caller=currentSession.remote_identity.uri.user;
+  document.getElementById('callAlert').classList.remove('active');
+  document.getElementById('callStatus').textContent='On call with: '+caller;
+  document.getElementById('hangupBtn').disabled=false;
+  document.getElementById('videoCallerLabel').textContent=caller;
+  document.getElementById('videoPanel').classList.add('active');
+  currentSession.answer({mediaConstraints:{audio:true,video:false}});
+  currentSession.connection.addEventListener('track',function(e){
+    if (e.track.kind==='audio'){
+      document.getElementById('remoteAudio').srcObject=new MediaStream([e.track]);
+      log('Audio connected','success');
+    }
+    if (e.track.kind==='video'){
+      document.getElementById('remoteVideo').srcObject=new MediaStream([e.track]);
+      document.getElementById('videoWrapper').style.display='block';
+      document.getElementById('noVideoMsg').style.display='none';
+      log('Video connected','success');
+    }
+  });
+  log('Call answered','success');
+}
+
+function rejectCall(){stopAlarm();if (currentSession) currentSession.terminate();endCall();log('Call rejected','warn');}
+function hangupCall(){if (currentSession) currentSession.terminate();endCall();log('Call ended','warn');}
+function endCall(){
+	stopAlarm(); 
+  currentSession=null;
+  document.getElementById('callAlert').classList.remove('active');
+  document.getElementById('videoPanel').classList.remove('active');
+  document.getElementById('callStatus').textContent='No active call';
+  document.getElementById('hangupBtn').disabled=true;
+  document.getElementById('remoteAudio').srcObject=null;
+  document.getElementById('remoteVideo').srcObject=null;
+  document.getElementById('videoWrapper').style.display='none';
+  document.getElementById('noVideoMsg').style.display='flex';
+}
+
+window.addEventListener('load', loadAll);
+</script>
+</body>
+</html>

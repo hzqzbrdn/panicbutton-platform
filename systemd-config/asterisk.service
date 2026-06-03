@@ -1,0 +1,17 @@
+[Unit]
+Description=Asterisk PBX
+After=network.target
+
+[Service]
+Type=simple
+User=asterisk
+Group=asterisk
+ExecStart=/usr/sbin/asterisk -mqf -C /etc/asterisk/asterisk.conf
+ExecReload=/usr/sbin/asterisk -rx "core reload"
+Restart=always
+RestartSec=5
+LimitCORE=infinity
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target
