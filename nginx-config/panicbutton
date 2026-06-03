@@ -41,7 +41,7 @@ server {
 # Port 8443 - for LAN IP access
 server {
     listen 8443 ssl;
-    server_name 192.168.1.185;
+    server_name YOUR_SERVER_LAN_IP;
 
     ssl_certificate /etc/asterisk/keys/self.crt;
     ssl_certificate_key /etc/asterisk/keys/self.key;

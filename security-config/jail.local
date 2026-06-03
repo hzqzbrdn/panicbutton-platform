@@ -1,0 +1,14 @@
+[asterisk]
+enabled = true
+port = 5060
+filter = asterisk
+logpath = /var/log/asterisk/messages.log
+maxretry = 10
+bantime = 3600
+findtime = 600
+
+[sshd]
+enabled = true
+port = 22
+maxretry = 5
+bantime = 3600
